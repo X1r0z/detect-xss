@@ -113,6 +113,10 @@ def get_output_position(links):
                         print(p,'output on the page')
 
 
+def inject_xss_payload():
+    pass
+
+
 ulinks = get_dynamic_links_url(url)
 flinks = get_dynamic_links_form(url)
 print(ulinks)

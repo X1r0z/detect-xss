@@ -3,7 +3,7 @@ error_reporting(0);
 header('X-XSS-Protection: 0');
 ?>
 
-<h1> Ref-XSS Test Example Page</h1>
+<h1>Ref-XSS Test Example Page</h1>
 
 <p><i>xss-example is a example site for ref-xss scanners.</i></p>
 

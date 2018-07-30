@@ -87,39 +87,95 @@ def get_dynamic_links_form(murl):
 
 def get_output_position(links):
     '''
-    {'http://127.0.0.1/xss.php': {'get': ['form', 'protect2'], 'post': ['user', 'pass', 'code']}}
+    Get the output position
     '''
+    plinks = dict()
     for murl,item in links.items():
         for method,params in item.items():
             for p in params:
+                if not murl in plinks:
+                    plinks[murl] = dict()
+                if not method in plinks[murl]:
+                    plinks[murl][method] = dict()
                 rnd = ''.join(random.sample(string.ascii_letters,8))
                 if method == 'get':
                     response = requests.get(murl,params={p:rnd})
                 else:
                     response = requests.post(murl,data={p:rnd})
                 regex_rnd = r'.*{0}.*'.format(rnd)
-                regex_tags = r'\<.((?!script).)*\>.*?{0}.*?\<\/((?!script).)*\>'.format(rnd)
+                regex_tags = r'\<.*\>.*?{0}.*?\<\/*\>'.format(rnd)
                 regex_attrs = r'\<.*\=\"{0}\".*\>'.format(rnd)
                 regex_js = r'var\s.*?\=.*?\"{0}\";'.format(rnd)
                 position = re.findall(regex_rnd,response.text)
                 for pos in position:
                     if re.findall(regex_tags,pos):
+                        if not 'tags' in plinks[murl][method]:
+                            plinks[murl][method]['tags'] = list()
                         print(p,'output on the tags')
+                        plinks[murl][method]['tags'].append(p)
                     elif re.findall(regex_attrs,pos):
+                        if not 'attrs' in plinks[murl][method]:
+                            plinks[murl][method]['attrs'] = list()
                         print(p,'output on the attrs')
+                        plinks[murl][method]['attrs'].append(p)
                     elif re.findall(regex_js,pos):
+                        if not 'js' in plinks[murl][method]:
+                            plinks[murl][method]['js'] = list()
                         print(p,'output on the js')
+                        plinks[murl][method]['js'].append(p)
                     else:
+                        if not 'page' in plinks[murl][method]:
+                            plinks[murl][method]['page'] = list()
                         print(p,'output on the page')
+                        plinks[murl][method]['page'].append(p)
+    return plinks
 
+'''
+(?<=\<.*)(.*)?(?=\>STRING)
 
-def inject_xss_payload():
+'''
+
+def inject_xss_payload(links):
+    '''
+    Testing XSS vul
+    '''
+    for murl,mitem in links.items():
+        for method,item in mitem.items():
+            for pos,params in item.items():
+                for p in params:
+                    rnd = ''.join(random.sample(string.ascii_letters,8))
+                    regex_tagname = r'(?<=\<.*)(.*)?(?=\>{0})'.format(rnd)
+                    if pos == 'tags':
+                        if method == 'get':
+                            response = requests.get(url,params={p:rnd})
+                        else:
+                            response = requests.post(url,data={p:rnd})
+                        tagname = re.findall(regex_tagname,response.text)[0]
+                        payload = gen_tags_payload(tagname)
+                        print(payload)
+                    elif pos == 'attrs':
+                        rnd = ''.join(random.sample(string.ascii_letters,8))
+                    elif pos == 'js':
+                        rnd = ''.join(random.sample(string.ascii_letters,8))
+                    else:
+                        rnd = ''.join(random.sample(string.ascii_letters,8))
+
+def gen_tags_payload(tagname):
+    payload = '</{0}>alert(0)'.format(tagname)
+    return payload
+
+def gen_attrs_payload(tagname):
     pass
 
+def gen_js_payload():
+    pass
 
 ulinks = get_dynamic_links_url(url)
 flinks = get_dynamic_links_form(url)
-print(ulinks)
-print(flinks)
-get_output_position(ulinks)
-get_output_position(flinks)
+#print(ulinks)
+#print(flinks)
+plinks1 = get_output_position(ulinks)
+plinks2 = get_output_position(flinks)
+#print(plinks1)
+#print(plinks2)
+inject_xss_payload(plinks1)

@@ -2,7 +2,7 @@
 error_reporting(0);
 header('X-XSS-Protection: 0');
 
-echo 'id:'.$_GET['id'];
+echo 'id:'.'<b>'.$_GET['id'].'</b>';
 echo '<br / >';
 
 echo 'username:'.$_POST['user'];

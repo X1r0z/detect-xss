@@ -10,13 +10,13 @@ header('X-XSS-Protection: 0');
 <a href="non-xss.php">non-xss</a>
 // Not dynamic Link, so scanners should not test it.
 <br />
-<a href="<?php echo 'http://'.$_SERVER['SERVER_NAME'].dirname($_SERVER['SCRIPT_NAME']);?>/xss.php?id=123">id</a>
+<a href="<?php echo 'http://'.$_SERVER['SERVER_NAME'].':8000'.dirname($_SERVER['SCRIPT_NAME']);?>/xss.php?id=123">id</a>
 // Dynamic Link, GET method, the output will be shown on the page.
 <br />
 <a href="<?php echo dirname($_SERVER['SCRIPT_NAME']);?>/index.php?form=search">form</a>
 // Dynamic Link, GET method, the output will be used as a value parameter in `input` tag.
 <br />
-<a href="<?php echo '//'.$_SERVER['SERVER_NAME'].dirname($_SERVER['SCRIPT_NAME']);?>/index.php?callback=ajax">callback</a>
+<a href="<?php echo '//'.$_SERVER['SERVER_NAME'].':8000'.dirname($_SERVER['SCRIPT_NAME']);?>/index.php?callback=ajax">callback</a>
 // Dynamic Link, GET method, the output will be shown between `script` tags.
 <br />
 <a href="xss.php?protect1=test">protect1</a>

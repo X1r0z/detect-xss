@@ -36,6 +36,16 @@ bs4 批量获取表单 action 值及 input 标签
 
 *以上给出的 payload 皆为示例*
 
+## 测试流程
+
+1. 检测是否为动态参数
+
+2. 定位输出点
+
+3. 测试过滤参数
+
+4. 根据信息构造 payload
+
 # xss-example
 
 `xss-example` 是为 `ref-xss scanner` 检测 `XSS` 漏洞的示例站点.

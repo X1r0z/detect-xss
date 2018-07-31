@@ -1,5 +1,7 @@
+#!/usr/bin/python
 from bs4 import BeautifulSoup as bs
 from urllib.parse import urlsplit
+from urllib.parse import urljoin
 import requests
 import random
 import string
@@ -7,7 +9,7 @@ import re
 import os
 import sys
 
-url = 'http://127.0.0.1:8000/xss-example';
+url = 'http://127.0.0.1:8000/xss-example/';
 
 def get_dynamic_links_url(murl):
     '''
@@ -29,9 +31,10 @@ def get_dynamic_links_url(murl):
         elif el['href'].startswith('/'):
             url = murl.split('//',1)[0] + '//' + host + el['href']
         else:
-            url = murl.split('//',1)[0] + '//' + host + '/' + dirname + '/' + el['href']
+            url = urljoin(murl,el['href'])
         if url.find('?') != -1:
             url = url.split('?')[0]
+        url = url.replace('//','/').replace('/','//',1)
         qlist = dict()
         if query:
             if query.find('&') != -1:
@@ -58,43 +61,7 @@ def get_dynamic_links_rest(murl):
     '''
     Read dynamic links from REST url, only GET
     '''
-    rest_links = dict()
-    response = requests.get(murl)
-    html = bs(response.text,'html.parser')
-    a = html.find_all(name='a')
-    for el in a:
-        parse = urlsplit(el['href'])
-        host = murl.split('//',1)[1].split('/',1)[0]
-        path = parse[2]
-        dirname = os.path.dirname(murl.split('//',1)[1].split('/',1)[1])
-        if el['href'].startswith('http'):
-            url = el['href']
-        elif el['href'].startswith('//'):
-            url = murl.split('//',1)[0] + el['href']
-        elif el['href'].startswith('/'):
-            url = murl.split('//',1)[0] + '//' + host + el['href']
-        else:
-            url = murl.split('//',1)[0] + '//' + host + '/' + dirname + '/' + el['href']
-        if url.find('?') != -1:
-            url = url.split('?')[0]
-        plist = path.split('/')
-        for p in plist:
-            fuzz = plist
-            rnd = ''.join(random.sample(string.ascii_letters,8))
-            fuzz[plist.index(p)] = rnd
-            req = '/'.join(fuzz)
-            print(req)
-            rurl = murl.split('//',1)[0] + host + '/' + req
-            print(rurl)
-            response = requests.get(rurl)
-            if response.text.find(rnd) != -1:
-                print(path,'is dynamic')
-            if not url in rest_links:
-                rest_links[url] = dict()
-            if not 'get' in rest_links[url]:
-                rest_links[url]['get'] = list()
-            rest_links[url]['get'].append(p)
-    return rest_links
+    pass
 
 
 def get_dynamic_links_form(murl):
@@ -117,7 +84,8 @@ def get_dynamic_links_form(murl):
         elif f['action'].startswith('/'):
             url = murl.split('//',1)[0] + '//' + host + f['action']
         else:
-            url = murl.split('//',1)[0] + '//' + host + '/' + dirname + '/' + f['action']
+            url = urljoin(murl,f['action'])
+        url = url.replace('//','/').replace('/','//',1)
         tags = f.find_all(name='input')
         print('action:',url)
         print('method:',f['method'])
@@ -125,10 +93,15 @@ def get_dynamic_links_form(murl):
             form_links[url] = dict()
         if not f['method'] in form_links[url]:
             form_links[url][f['method']] = list()
-        for el in tags:
-            if el['type'] != 'submit':
-                print(el['name'],'is dynamic')
-                form_links[url][f['method']].append(el['name'])
+        data = dict(zip([el['name'] for el in tags],[''.join(random.sample(string.ascii_letters,8)) for _ in tags]))
+        if f['method'] == 'get':
+            response = requests.get(url,params=data)
+        else:
+            response = requests.post(url,data=data)
+        for k,v in data.items():
+            if response.text.find(v) != -1:
+                print(k,'is dynamic')
+                form_links[url][f['method']].append(k)
     return form_links
 
 
@@ -139,42 +112,42 @@ def get_output_position(links):
     plinks = dict()
     for murl,item in links.items():
         for method,params in item.items():
-            for p in params:
-                if not murl in plinks:
-                    plinks[murl] = dict()
-                if not method in plinks[murl]:
-                    plinks[murl][method] = dict()
-                rnd = ''.join(random.sample(string.ascii_letters,8))
-                if method == 'get':
-                    response = requests.get(murl,params={p:rnd})
-                else:
-                    response = requests.post(murl,data={p:rnd})
-                regex_rnd = r'.*{0}.*'.format(rnd)
-                regex_tags = r'\<.*\>.*?{0}.*?\<\/.*\>'.format(rnd)
-                regex_attrs = r'\<.*\=\"{0}\".*\>'.format(rnd)
-                regex_js = r'var\s.*?\=.*?\"{0}\";'.format(rnd)
+            if not murl in plinks:
+                plinks[murl] = dict()
+            if not method in plinks[murl]:
+                plinks[murl][method] = dict()
+            data = dict(zip(params,[''.join(random.sample(string.ascii_letters,8)) for _ in params]))
+            if method == 'get':
+                response = requests.get(murl,params=data)
+            else:
+                response = requests.post(murl,data=data)
+            for k,v in data.items():
+                regex_rnd = r'.*{0}.*'.format(v)
+                regex_tags = r'\<.*\>.*?{0}.*?\<\/.*\>'.format(v)
+                regex_attrs = r'\<.*\=\"{0}\".*\>'.format(v)
+                regex_js = r'var\s.*?\=.*?\"{0}\";'.format(v)
                 position = re.findall(regex_rnd,response.text)
                 for pos in position:
                     if re.findall(regex_tags,pos):
                         if not 'tags' in plinks[murl][method]:
                             plinks[murl][method]['tags'] = list()
-                        print(p,'output on the tags')
-                        plinks[murl][method]['tags'].append(p)
+                        print(k,'output on the tags')
+                        plinks[murl][method]['tags'].append(k)
                     elif re.findall(regex_attrs,pos):
                         if not 'attrs' in plinks[murl][method]:
                             plinks[murl][method]['attrs'] = list()
-                        print(p,'output on the attrs')
-                        plinks[murl][method]['attrs'].append(p)
+                        print(k,'output on the attrs')
+                        plinks[murl][method]['attrs'].append(k)
                     elif re.findall(regex_js,pos):
                         if not 'js' in plinks[murl][method]:
                             plinks[murl][method]['js'] = list()
-                        print(p,'output on the js')
-                        plinks[murl][method]['js'].append(p)
+                        print(k,'output on the js')
+                        plinks[murl][method]['js'].append(k)
                     else:
                         if not 'page' in plinks[murl][method]:
                             plinks[murl][method]['page'] = list()
-                        print(p,'output on the page')
-                        plinks[murl][method]['page'].append(p)
+                        print(k,'output on the page')
+                        plinks[murl][method]['page'].append(k)
     return plinks
 
 
@@ -212,8 +185,6 @@ def inject_xss_payload(links):
 
 ulinks = get_dynamic_links_url(url)
 flinks = get_dynamic_links_form(url)
-#rlinks = get_dynamic_links_rest(url)
 plinks1 = get_output_position(ulinks)
 plinks2 = get_output_position(flinks)
-#plinks3 = get_output_position(rlinks)
 inject_xss_payload(plinks1)

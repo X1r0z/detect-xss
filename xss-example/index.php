@@ -1,6 +1,7 @@
 <?php
 error_reporting(0);
 header('X-XSS-Protection: 0');
+include('config.php');
 ?>
 
 <h1>Ref-XSS Test Example Page</h1>
@@ -10,20 +11,23 @@ header('X-XSS-Protection: 0');
 <a href="non-xss.php">non-xss</a>
 // Not dynamic Link, so scanners should not test it.
 <br />
-<a href="<?php echo 'http://'.$_SERVER['SERVER_NAME'].':8000'.dirname($_SERVER['SCRIPT_NAME']);?>/xss.php?id=123">id</a>
-// Dynamic Link, GET method, the output will be shown on the page.
+<a href="<?php echo 'http://'.$webhost.$wwwroot;?>/xss.php?id=123">id</a>
+// Dynamic Link, GET method, the output will be shown on between `b` tags.
 <br />
-<a href="<?php echo dirname($_SERVER['SCRIPT_NAME']);?>/index.php?form=search">form</a>
+<a href="xss.php/api/1">rest api</a>
+// Dynamic Link, GET method, REST url, the output will be shown between `noscript` tags.
+<br />
+<a href="<?php echo $wwwroot;?>index.php?form=search">form</a>
 // Dynamic Link, GET method, the output will be used as a value parameter in `input` tag.
 <br />
-<a href="<?php echo '//'.$_SERVER['SERVER_NAME'].':8000'.dirname($_SERVER['SCRIPT_NAME']);?>/index.php?callback=ajax">callback</a>
+<a href="<?php echo '//'.$webhost.$wwwroot;?>index.php?callback=ajax">callback</a>
 // Dynamic Link, GET method, the output will be shown between `script` tags.
 <br />
 <a href="xss.php?protect1=test">protect1</a>
 // Dynamic Link, GET method, the output will be shown on the page by `htmlspecialchars()`.
 <br />
 <a href="index.php?protect2=test">protect2</a>
-// Dynamic Link, GET method, tthe output will be used as a value parameter in `input` tag by `htmlspecialchars()`.
+// Dynamic Link, GET method, the output will be used as a value parameter in `input` tag by `htmlspecialchars()`.
 
 <h2>Login Test</h2>
 <form method="post" action="xss.php">

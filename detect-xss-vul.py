@@ -1,5 +1,5 @@
-from urllib.parse import urlsplit,urljoin
 from bs4 import BeautifulSoup as bs
+from urllib.parse import urlsplit
 import requests
 import random
 import string
@@ -7,7 +7,7 @@ import re
 import os
 import sys
 
-url = 'http://127.0.0.1:8000/xss-example/';
+url = 'http://127.0.0.1:8000/xss-example';
 
 def get_dynamic_links_url(murl):
     '''
@@ -32,14 +32,25 @@ def get_dynamic_links_url(murl):
             url = murl.split('//',1)[0] + '//' + host + '/' + dirname + '/' + el['href']
         if url.find('?') != -1:
             url = url.split('?')[0]
+        qlist = dict()
         if query:
-            print(el['href'],'is dynamic')
-            if not url in url_links:
-                url_links[url] = dict()
-            if not 'get' in url_links[url]:
-                url_links[url]['get'] = list()
-            name = query.split('=',1)[0]
-            url_links[url]['get'].append(name)
+            if query.find('&') != -1:
+                for q in query.split('&'):
+                    qlist[q.split('=',1)[0]] = q.split('=',1)[1]
+            else:
+                qlist[query.split('=',1)[0]] = query.split('=',1)[1]
+            for k,_ in qlist.items():
+                rnd = ''.join(random.sample(string.ascii_letters,8))
+                fuzz = qlist
+                fuzz[k] = rnd
+                response = requests.get(url,params=fuzz)
+                if response.text.find(rnd) != -1:
+                    print(k,'is dynamic')
+                    if not url in url_links:
+                        url_links[url] = dict()
+                    if not 'get' in url_links[url]:
+                        url_links[url]['get'] = list()
+                    url_links[url]['get'].append(k)
     return url_links
 
 
@@ -47,7 +58,43 @@ def get_dynamic_links_rest(murl):
     '''
     Read dynamic links from REST url, only GET
     '''
-    pass
+    rest_links = dict()
+    response = requests.get(murl)
+    html = bs(response.text,'html.parser')
+    a = html.find_all(name='a')
+    for el in a:
+        parse = urlsplit(el['href'])
+        host = murl.split('//',1)[1].split('/',1)[0]
+        path = parse[2]
+        dirname = os.path.dirname(murl.split('//',1)[1].split('/',1)[1])
+        if el['href'].startswith('http'):
+            url = el['href']
+        elif el['href'].startswith('//'):
+            url = murl.split('//',1)[0] + el['href']
+        elif el['href'].startswith('/'):
+            url = murl.split('//',1)[0] + '//' + host + el['href']
+        else:
+            url = murl.split('//',1)[0] + '//' + host + '/' + dirname + '/' + el['href']
+        if url.find('?') != -1:
+            url = url.split('?')[0]
+        plist = path.split('/')
+        for p in plist:
+            fuzz = plist
+            rnd = ''.join(random.sample(string.ascii_letters,8))
+            fuzz[plist.index(p)] = rnd
+            req = '/'.join(fuzz)
+            print(req)
+            rurl = murl.split('//',1)[0] + host + '/' + req
+            print(rurl)
+            response = requests.get(rurl)
+            if response.text.find(rnd) != -1:
+                print(path,'is dynamic')
+            if not url in rest_links:
+                rest_links[url] = dict()
+            if not 'get' in rest_links[url]:
+                rest_links[url]['get'] = list()
+            rest_links[url]['get'].append(p)
+    return rest_links
 
 
 def get_dynamic_links_form(murl):
@@ -146,14 +193,15 @@ def inject_xss_payload(links):
                             response = requests.get(murl,params={p:rnd})
                         else:
                             response = requests.post(murl,data={p:rnd})
-                        tagname = re.findall(regex_tagname,response.text)[0]
-                        payload = '</{0}><script>alert(/xss/)</script>'.format(tagname)
-                        if method == 'get':
-                            response = requests.get(murl, params={p:payload})
-                        else:
-                            response = requests.post(murl,data={p:payload})
-                        if response.text.find(payload) != -1:
-                            print(p,'detect xss:',payload)
+                        tagname = re.findall(regex_tagname,response.text)
+                        for tag in tagname:
+                            payload = '</{0}><script>alert(/xss/)</script>'.format(tag)
+                            if method == 'get':
+                                response = requests.get(murl, params={p:payload})
+                            else:
+                                response = requests.post(murl,data={p:payload})
+                            if response.text.find(payload) != -1:
+                                print(p,'detect xss:',payload)
                     elif pos == 'attrs':
                         rnd = ''.join(random.sample(string.ascii_letters,8))
                     elif pos == 'js':
@@ -164,10 +212,8 @@ def inject_xss_payload(links):
 
 ulinks = get_dynamic_links_url(url)
 flinks = get_dynamic_links_form(url)
-#print(ulinks)
-#print(flinks)
+#rlinks = get_dynamic_links_rest(url)
 plinks1 = get_output_position(ulinks)
 plinks2 = get_output_position(flinks)
-#print(plinks1)
-#print(plinks2)
+#plinks3 = get_output_position(rlinks)
 inject_xss_payload(plinks1)

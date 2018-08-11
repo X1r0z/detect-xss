@@ -360,12 +360,13 @@ def inject_xss_payload(links):
             else:
                 response = requests.post(url,data=fuzz)
             tagname = list()
+            attrname = list()
             regex_tagname = r'(?<=\<)(.*?)(?=\>.*?{0}.*?)'.format(rnd)
             regex_attrname = r'(?<=\<)(.*?)(?=\s.*?{0})'.format(rnd)
             if 'tags' in ppos:
                 tagname += re.findall(regex_tagname,response.text)
             if 'attrs' in ppos:
-                keyword += re.findall(regex_attrname,response.text)
+                attrname += re.findall(regex_attrname,response.text)
 
 
 xlinks1 = [{
